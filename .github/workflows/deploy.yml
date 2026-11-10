@@ -1,0 +1,89 @@
+name: CI/CD — GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Validate static site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check essential project files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in index.html styles.css figma-reader.js page-narration.js; do
+            if [[ ! -f "$file" ]]; then
+              echo "Required file not found: $file" >&2
+              exit 1
+            fi
+          done
+          for dir in assets/images assets/fonts; do
+            if [[ ! -d "$dir" ]]; then
+              echo "Required directory not found: $dir" >&2
+              exit 1
+            fi
+          done
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check figma-reader.js
+          node --check page-narration.js
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: ci
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Prepare static site artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          site_dir="$RUNNER_TEMP/idibi-site"
+          mkdir -p "$site_dir/assets"
+          cp index.html styles.css figma-reader.js page-narration.js "$site_dir/"
+          cp -R assets/. "$site_dir/assets/"
+
+      - name: Upload static site artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ${{ runner.temp }}/idibi-site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
